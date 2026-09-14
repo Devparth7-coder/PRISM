@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root{
+    --bg:#08090b; --panel:#0e1013; --panel2:#14171c; --line:#23272f;
+    --g1:#5a6170; --g2:#8b93a1; --g3:#c7ccd6; --white:#f5f5f6;
+    --red:#ef4444; --red2:#b91c1c; --amber:#f59e0b; --green:#22c55e; --blue:#3b82f6;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:Inter,"Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:var(--bg);overflow:hidden;font-family:var(--sans);color:var(--g3)}
+  #stage{position:absolute;inset:0}
+  .grid-bg{position:absolute;inset:0;
+    background-image:linear-gradient(rgba(255,255,255,.028) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.028) 1px,transparent 1px);
+    background-size:56px 56px;
+    mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 78%)}
+  .vignette{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,transparent 55%,rgba(0,0,0,.55) 100%)}
+  .mono{font-family:var(--mono)}
+  .panel{background:linear-gradient(180deg,#12151a,#0c0e12);border:1px solid var(--line);border-radius:14px}
+  .chip{border:1px solid var(--line);background:#101318;border-radius:999px;padding:8px 18px;font-size:20px;letter-spacing:2px;font-weight:600;color:var(--g2)}
+  .fade{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease}
+  .kicker{font-size:15px;letter-spacing:6px;color:var(--red);font-weight:700;text-transform:uppercase}
+  .big{font-weight:800;letter-spacing:-.02em;color:var(--white)}
+  .edge{stroke:#3a4150;stroke-width:2;fill:none;stroke-dasharray:1000;stroke-dashoffset:1000;transition:stroke-dashoffset .8s ease}
+  .edge.on{stroke-dashoffset:0}
+  .edge.red{stroke:var(--red)} .edge.green{stroke:var(--green)} .edge.amber{stroke:var(--amber)}
+  .node{border:1px solid var(--line);background:#101318;border-radius:12px;padding:12px 16px;font-size:17px;color:var(--g2);
+    opacity:0;transform:scale(.92);transition:all .45s cubic-bezier(.2,.8,.2,1)}
+  .node.on{opacity:1;transform:scale(1);border-color:#3a4150;color:var(--g3)}
+  .node.hot{border-color:var(--red);color:var(--white);box-shadow:0 0 0 1px rgba(239,68,68,.35),0 0 34px rgba(239,68,68,.18)}
+  .node.ok{border-color:rgba(34,197,94,.7);color:#bbf7d0}
+  .pulse::after{content:"";position:absolute;inset:-1px;border-radius:inherit;border:1px solid currentColor;opacity:.5;animation:pulse 1.6s ease-out infinite}
+  @keyframes pulse{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.12);opacity:0}}
+  .blink{animation:blink 1s steps(1) infinite}@keyframes blink{50%{opacity:0}}
+  /* vertical sizing */
+  body.v{ }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+const params = new URLSearchParams(location.search);
+const SCENE = params.get("scene");
+const DUR = parseFloat(params.get("dur") || "10");
+const V = params.get("v") === "1";
+const W = V ? 1080 : 1920, H = V ? 1920 : 1080;
+const $ = (s, r=document) => r.querySelector(s);
+const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
+const ease = x=>x<.5?2*x*x:1-Math.pow(-2*x+2,2)/2;
+const seg = (t,a,b)=>clamp((t-a)/(b-a),0,1);
+const scenes = {};
+function register(name, fn){ scenes[name]=fn; }
+
+/* ---------- shared chrome ---------- */
+function chrome(){
+  return `<div class="grid-bg"></div><div class="vignette"></div>`;
+}
+function mark(el, sel, on, at){
+  const n = el.querySelector(sel);
+  if(!n) return;
+  const e = ease(at);
+  n.style.opacity = on===false ? 1-e : e;
+  n.style.transform = `translateY(${(1-e)*16}px)`;
+}
+
+/* ============================================================ TERMINAL */
+register("terminal", (el,t)=>{
+  const lines = [
+    {at:1.0, text:'$ gh pr view 184 --json title,files,commits', cls:'cmd'},
+    {at:2.6, text:'Add organization member management API', cls:'dim'},
+    {at:3.6, text:'3 files changed · +90 −1 · commit b02f9e4', cls:'dim'},
+    {at:5.0, text:'$ prism review --commit b02f9e4', cls:'cmd'},
+    {at:6.4, text:'▸ snapshot pinned · context graph built · 9 stages', cls:'sys'},
+  ];
+  const diff = [
+    ['@@ router.post("/orgs/:orgId/members") @@','h'],
+    ['+ router.post(..., async (req,res) => {','a'],
+    ['+   const { orgId } = req.params;','a'],
+    ['+   const role = req.body.role;','a'],
+    ['+   const rows = db.query(`SELECT id FROM members','a'],
+    ["+     WHERE org_id = '${orgId}' AND role='${role}'`);",'crit'],
+    ['+   res.json(rows);','a'],
+  ];
+  const findings = [
+    {at:21.5, sev:'CRITICAL', txt:'SQL query built from interpolated input', file:'members.ts:51'},
+    {at:23.5, sev:'HIGH', txt:'Endpoint registered without authorization middleware', file:'members.ts:38'},
+    {at:25.2, sev:'HIGH', txt:'Condition is always true — validation cannot work', file:'members.ts:44'},
+  ];
+  el.innerHTML = chrome()+`
+  <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+    <div id="term" class="panel" style="width:1180px;opacity:0;transition:opacity .6s">
+      <div style="display:flex;gap:8px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)">
+        <span style="width:12px;height:12px;border-radius:50%;background:#3a4150"></span>
+        <span style="width:12px;height:12px;border-radius:50%;background:#3a4150"></span>
+        <span style="width:12px;height:12px;border-radius:50%;background:var(--red)"></span>
+        <span class="mono" style="margin-left:12px;font-size:14px;color:var(--g1)">pull-request #184 — atlas/atlas-org-service</span>
+      </div>
+      <div class="mono" style="padding:22px 24px;font-size:19px;line-height:1.7;min-height:560px">
+        ${lines.map((l,i)=>`<div id="l${i}" style="opacity:0;${l.cls==='cmd'?'color:#dfe4ec':l.cls==='sys'?'color:var(--amber)':'color:var(--g1)'}">${l.text}</div>`).join('')}
+        <div id="diffbox" style="margin-top:18px;border:1px solid var(--line);border-radius:10px;overflow:hidden;opacity:0">
+          <div style="background:#0b0d10;padding:10px 16px;color:var(--g1);font-size:15px">src/routes/members.ts</div>
+          ${diff.map((d,i)=>`<div id="d${i}" class="diffline" style="opacity:0;white-space:pre;padding:1px 16px;color:${d[1]==='crit'?'#fecaca':'#dfe4ec'};background:${d[1]==='crit'?'rgba(239,68,68,.16)':d[1]==='a'?'rgba(34,197,94,.07)':'transparent'}">${d[0]}</div>`).join('')}
+        </div>
+        <div id="fbox" style="margin-top:16px"></div>
+        <div id="cursor" class="blink mono" style="color:var(--red);opacity:0">▊</div>
+      </div>
+    </div>
+  </div>`;
+  const open = ease(seg(t,.2,.9));
+  $('#term',el).style.opacity = open;
+  $('#term',el).style.transform = `scale(${1.04-open*.04})`;
+  lines.forEach((l,i)=>{
+    const n=$('#l'+i,el); if(!n)return;
+    const a=ease(seg(t,l.at,l.at+0.5));
+    n.style.opacity=a; n.textContent = l.text.slice(0, Math.floor(l.text.length*ease(seg(t,l.at,l.at+0.9)))) + (i===lines.length-1?'':'');
+  });
+  const db = ease(seg(t,8.2,9));
+  $('#diffbox',el).style.opacity=db;
+  diff.forEach((d,i)=>{ const n=$('#d'+i,el); if(n) n.style.opacity=ease(seg(t,9+i*.55,9.6+i*.55)); });
+  const fbox=$('#fbox',el);
+  if(fbox.childElementCount===0){
+    findings.forEach(f=>{
+      const d=document.createElement('div');
+      d.className='frow'; d.style.cssText='display:flex;gap:14px;align-items:center;margin-top:10px;padding:12px 16px;border:1px solid rgba(239,68,68,.4);border-radius:10px;background:rgba(239,68,68,.07);opacity:0;transform:translateX(-16px);transition:all .5s';
+      d.innerHTML=`<span style="font-weight:800;font-size:15px;letter-spacing:1px;color:${f.sev==='CRITICAL'?'#fca5a5':'#fda4af'};min-width:96px">${f.sev}</span><span style="color:#f1f3f7">${f.txt}</span><span style="margin-left:auto;color:var(--g1);font-size:15px">${f.file}</span>`;
+      fbox.appendChild(d);
+    });
+  }
+  [...fbox.children].forEach((n,i)=>{ const a=ease(seg(t,findings[i].at,findings[i].at+.5)); n.style.opacity=a; n.style.transform=`translateX(${(1-a)*-16}px)`; });
+  const zoom = ease(seg(t,28,31));
+  $('#term',el).style.transform=`scale(${1.04-open*.04 + zoom*.18})`;
+  $('#term',el).style.boxShadow=`0 0 ${zoom*90}px rgba(239,68,68,${zoom*.25})`;
+  // highlight crit line extra
+  const dc=$('#d5',el); if(dc){dc.style.outline=`${zoom*2}px solid rgba(239,68,68,${zoom*.6})`;dc.style.outlineOffset='-2px';}
+});
+
+/* ============================================================ TITLE */
+register("title",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px">
+    <div id="bar" style="width:0;height:3px;background:linear-gradient(90deg,transparent,var(--red),transparent)"></div>
+    <div id="word" class="big" style="font-size:132px;letter-spacing:34px;padding-left:34px;opacity:0;transform:scale(.96)">PRISM</div>
+    <div id="sub" style="font-size:23px;letter-spacing:9px;color:var(--g2);opacity:0;padding-left:9px">PULL REQUEST INTELLIGENCE &amp; REVIEW MESH</div>
+    <div id="tag" class="kicker" style="color:var(--g3);letter-spacing:5px;font-size:21px;opacity:0">AI code review that understands your repository.</div>
+  </div>`;
+  const w=ease(seg(t,.3,1.1)); $('#word',el).style.opacity=w; $('#word',el).style.transform=`scale(${.96+w*.04})`;
+  $('#bar',el).style.width=(ease(seg(t,.1,1.2))*520)+'px';
+  $('#sub',el).style.opacity=ease(seg(t,1.1,1.8));
+  $('#tag',el).style.opacity=ease(seg(t,2.0,2.7));
+  el.style.opacity=1-ease(seg(t,DUR-.5,DUR));
+});
+
+/* ============================================================ PROBLEM */
+register("problem",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;left:80px;top:90px" id="k" class="kicker fade">THE PROBLEM</div>
+  <div style="position:absolute;left:80px;top:130px" class="big fade" id="h" style="font-size:54px;max-width:800px;line-height:1.15">A diff rarely tells the whole story.</div>
+  <div style="position:absolute;left:700px;top:330px">
+    <svg width="1150" height="640" style="overflow:visible">
+      <line class="edge" id="e0" x1="250" y1="120" x2="520" y2="120"/>
+      <line class="edge" id="e1" x1="720" y1="120" x2="920" y2="120"/>
+      <line class="edge red" id="e2" x1="1080" y1="120" x2="1180" y2="120" marker-end="url(#a)"/>
+      <defs><marker id="a" markerWidth="10" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L8,5 L0,10 z" fill="#ef4444"/></marker></defs>
+    </svg>
+    <div id="c0" class="node fade" style="position:absolute;left:60px;top:72px;width:260px;text-align:center">THE DIFF</div>
+    <div id="c1" class="node fade" style="position:absolute;left:460px;top:72px;width:260px;text-align:center">LIMITED CONTEXT</div>
+    <div id="c2" class="node fade" style="position:absolute;left:860px;top:72px;width:260px;text-align:center;border-color:rgba(239,68,68,.5);color:#fecaca">FALSE POSITIVES</div>
+    <div id="c3" class="node fade hot pulse" style="position:absolute;left:1110px;top:60px;width:240px;text-align:center">UNCERTAINTY</div>
+  </div>
+  <div id="files" style="position:absolute;left:120px;top:360px;width:560px"></div>
+  <div id="cap" style="position:absolute;left:120px;bottom:120px;max-width:1600px;font-size:34px;line-height:1.5;color:var(--g3);opacity:0">
+    Functions have callers. APIs have contracts. <span style="color:var(--white)">Authentication has boundaries.</span>
+  </div>`;
+  mark(el,'#k',true,seg(t,.2,.7));mark(el,'#h',true,seg(t,.5,1.2));mark(el,'#cap',true,seg(t,18,19));
+  [['#c0',2],['#e0',3.2],['#c1',3.6],['#e1',6],['#c2',6.4],['#e2',9],['#c3',9.4]].forEach(([s,a])=>{
+    const n=$(s,el);if(!n)return;const e=ease(seg(t,a,a+.7));
+    if(s.startsWith('#e')){n.classList.toggle('on',e>0);n.style.opacity=e;}else{n.style.opacity=e;n.style.transform=`translateY(${(1-e)*14}px)`;}
+  });
+  // related files bloom around a diff card
+  const rel=[
+    {x:0,y:0,label:'src/routes/members.ts',hot:true},
+    {x:-60,y:-150,label:'src/middleware/auth.ts'},
+    {x:330,y:-120,label:'src/db/client.ts'},
+    {x:300,y:120,label:'src/app.ts'},
+    {x:-40,y:180,label:'src/routes/organizations.ts'},
+    {x:420,y:0,label:'package.json'},
+  ];
+  const box=$('#files',el);
+  if(box.childElementCount===0){
+    rel.forEach((f,i)=>{
+      const d=document.createElement('div');
+      d.className='mono';
+      d.style.cssText=`position:absolute;left:${f.x}px;top:${f.y}px;padding:12px 16px;border-radius:10px;border:1px solid ${f.hot?'rgba(239,68,68,.6)':'var(--line)'};background:${f.hot?'rgba(239,68,68,.08)':'#101318'};color:${f.hot?'#fecaca':'var(--g1)'};font-size:16px;opacity:0;transform:scale(.9);transition:all .5s;white-space:nowrap`;
+      d.textContent=f.label; box.appendChild(d);
+    });
+  }
+  [...box.children].forEach((n,i)=>{const e=ease(seg(t,11+i*.9,11.6+i*.9));n.style.opacity=e;n.style.transform=`scale(${.9+e*.1})`;});
+  el.style.opacity=1-ease(seg(t,DUR-.5,DUR));
+});
+
+/* ============================================================ PIPELINE (architecture) */
+register("pipeline",(el,t)=>{
+  const stages=[
+    ['GITHUB APP','webhook · HMAC verified',1.5],
+    ['INGESTION','PR snapshot @ exact SHA',4.5],
+    ['CONTEXT ENGINE','profile · graph · memory',7.5],
+    ['DETERMINISTIC','rules · secrets · advisories',10.5],
+    ['REVIEW AGENTS','seven specialists',13.5],
+    ['ADVERSARIAL CRITIC','challenges HIGH / CRITICAL',22],
+    ['EVIDENCE VERIFIER','grounding · dedupe',26],
+    ['RISK ENGINE','0–100 weighted score',29.5],
+    ['SYNTHESIS & PUBLISH','inline + summary review',32.5],
+  ];
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;left:80px;top:64px" class="kicker fade" id="k">ARCHITECTURE</div>
+  <div id="h" class="big fade" style="position:absolute;left:80px;top:100px;font-size:46px">Deterministic first. Grounded AI second. Verified always.</div>
+  <svg id="svg" width="1920" height="1080" style="position:absolute;inset:0;overflow:visible"></svg>
+  <div id="layers"></div>`;
+  mark(el,'#k',true,seg(t,.2,.6));mark(el,'#h',true,seg(t,.4,1.1));
+  const svg=$('#svg',el);
+  const X=840;
+  // vertical positions: stages 0..3 compact, agents hub at 4, fan row, then 5..8
+  const Y=[232,296,360,424,488, 690,754,818,882];
+  const fanY=572;
+  let svgHtml='';
+  for(let i=0;i<4;i++){
+    svgHtml+=`<line class="edge" id="sp${i}" x1="${X}" y1="${Y[i]+46}" x2="${X}" y2="${Y[i+1]-10}"/>`;
+  }
+  svgHtml+=`<line class="edge" id="sp4" x1="${X}" y1="${Y[4]+40}" x2="${X}" y2="${fanY-14}"/>`;
+  svgHtml+=`<line class="edge green" id="sp5" x1="${X}" y1="${fanY+44}" x2="${X}" y2="${Y[5]-12}"/>`;
+  for(let i=5;i<stages.length-1;i++){
+    svgHtml+=`<line class="edge" id="sp${i}" x1="${X}" y1="${Y[i]+46}" x2="${X}" y2="${Y[i+1]-10}"/>`;
+  }
+  for(let i=0;i<7;i++){
+    const axc=X-450+i*150;
+    svgHtml+=`<line class="edge" id="fa${i}" x1="${X}" y1="${fanY-40}" x2="${axc}" y2="${fanY-10}"/>`;
+    svgHtml+=`<line class="edge green" id="fb${i}" x1="${axc}" y1="${fanY+42}" x2="${X}" y2="${Y[5]-12}"/>`;
+  }
+  svg.innerHTML=svgHtml;
+  const layers=$('#layers',el);
+  if(layers.childElementCount===0){
+    stages.forEach(([name,sub],i)=>{
+      if(name==='REVIEW AGENTS') return;
+      const d=document.createElement('div');
+      d.className='node'; d.id='st'+i;
+      d.style.cssText=`position:absolute;left:${X-230}px;top:${Y[i]}px;width:460px;text-align:center`;
+      d.innerHTML=`<div style="font-weight:700;color:var(--white);font-size:19px;letter-spacing:1px">${name}</div><div style="font-size:13px;color:var(--g1);margin-top:2px">${sub}</div>`;
+      layers.appendChild(d);
+    });
+    const agents=['SECURITY','BUGS','PERF','TESTS','MAINT','API','DEPS'];
+    agents.forEach((a,i)=>{
+      const d=document.createElement('div');
+      d.className='node'; d.id='ag'+i;
+      const ax=X-505+i*150;
+      d.style.cssText=`position:absolute;left:${ax}px;top:${fanY}px;width:110px;text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;padding:10px 6px`;
+      d.textContent=a; layers.appendChild(d);
+    });
+    const lab=document.createElement('div');
+    lab.className='node hot pulse'; lab.id='st4';
+    lab.style.cssText=`position:absolute;left:${X-230}px;top:${Y[4]}px;width:460px;text-align:center;padding:10px`;
+    lab.innerHTML='<div style="font-weight:700;color:#fff;font-size:18px;letter-spacing:1px">REVIEW AGENTS · seven specialists</div>';
+    layers.appendChild(lab);
+  }
+  stages.forEach((s,i)=>{
+    const n=$('#st'+i,el); if(n){const e=ease(seg(t,s[2],s[2]+.6));n.style.opacity=e;n.style.transform=`translateY(${(1-e)*10}px)`;n.classList.toggle('on',e>.1);}
+    if(i<stages.length-1){const sp=$('#sp'+i,el);if(sp){sp.classList.toggle('on',t>s[2]+.8);}}
+  });
+  for(let i=0;i<7;i++){
+    const a=ease(seg(t,15+i*.5,15.4+i*.5));
+    const fa=$('#fa'+i,el),fb=$('#fb'+i,el),ag=$('#ag'+i,el);
+    if(fa){fa.style.opacity=a;fa.classList.toggle('on',a>.1);}
+    if(ag){ag.style.opacity=a;ag.style.transform=`scale(${.9+a*.1})`;ag.classList.toggle('on',a>.1);}
+    const b=ease(seg(t,20.4,20.8)); if(fb){fb.style.opacity=b;fb.classList.toggle('on',b>.1);}
+  }
+  // critic emphasis
+  const crit=$('#st5',el); if(crit){crit.classList.toggle('ok',t>22.6);crit.style.boxShadow=t>22.6?'0 0 34px rgba(34,197,94,.18)':'';}
+  el.style.opacity=1-ease(seg(t,DUR-.6,DUR));
+});
+
+/* ============================================================ WEBHOOK / COMMITS */
+register("webhook",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div class="kicker fade" id="k" style="position:absolute;left:80px;top:70px">GITHUB INTEGRATION</div>
+  <div id="cards" style="position:absolute;inset:180px 100px"></div>`;
+  mark(el,'#k',true,seg(t,.2,.7));
+  const box=$('#cards',el);
+  const items=[
+    {at:1, kind:'event', head:'pull_request · opened', mono:'delivery 7f3c…9a2 · HMAC-SHA256 ✓', note:'verified & persisted'},
+    {at:5, kind:'job', head:'job review-pr · queued', mono:'dedupe key  review:pr-184:b02f9e4', note:'idempotent per commit'},
+    {at:9, kind:'sha', head:'review pinned to commit', mono:'b02f9e4…002  →  review #1 · risk 63', note:'REQUEST CHANGES'},
+    {at:15, kind:'push', head:'pull_request · synchronize', mono:'new commit c33d71a…003', note:'author pushed a fix'},
+    {at:19, kind:'sha2', head:'review #2 · same pull request', mono:'c33d71a…003  →  review #2 · risk 3', note:'APPROVE · 13 findings fixed'},
+  ];
+  if(box.childElementCount===0){
+    items.forEach((it,i)=>{
+      const d=document.createElement('div');
+      d.style.cssText=`position:absolute;left:${i%2?520:40}px;top:${Math.floor(i/2)*250}px;width:${i===4?980:470}px;padding:26px 30px;opacity:0;transform:translateY(18px);transition:all .6s`;
+      d.className='panel';
+      d.id='w'+i;
+      const color=it.kind.startsWith('sha2')?'#bbf7d0':it.kind==='push'?'#fde68a':it.kind==='event'?'#dfe4ec':'#dfe4ec';
+      d.innerHTML=`<div style="font-size:24px;font-weight:700;color:var(--white)">${it.head}</div>
+        <div class="mono" style="font-size:16px;color:var(--g2);margin-top:10px">${it.mono}</div>
+        <div style="margin-top:12px;font-size:15px;letter-spacing:2px;text-transform:uppercase;font-weight:700;color:${color}">${it.note}</div>`;
+      box.appendChild(d);
+    });
+  }
+  items.forEach((it,i)=>{const n=$('#w'+i,el);if(!n)return;const e=ease(seg(t,it.at,it.at+.6));n.style.opacity=e;n.style.transform=`translateY(${(1-e)*18}px)`;});
+  el.style.opacity=1-ease(seg(t,DUR-.6,DUR));
+});
+
+/* ============================================================ CONTEXT GRAPH */
+register("context",(el,t)=>{
+  const nodes=[
+    {id:'changed',x:720,y:420,label:'POST /orgs/:orgId/members',sub:'changed function · members.ts',hot:true},
+    {id:'route',x:720,y:180,label:'routes/organizations.ts',sub:'caller'},
+    {id:'app',x:300,y:180,label:'app.ts',sub:'router registration'},
+    {id:'auth',x:1160,y:180,label:'middleware/auth.ts',sub:'auth boundary (skipped)'},
+    {id:'db',x:720,y:680,label:'db/client.ts',sub:'callee · raw db.query'},
+    {id:'test',x:1180,y:680,label:'members.test.ts',sub:'test coverage — missing'},
+    {id:'pkg',x:280,y:680,label:'package.json',sub:'conventions · dependencies'},
+  ];
+  const edges=[['changed','route'],['route','app'],['changed','auth'],['changed','db'],['changed','test'],['changed','pkg']];
+  const pos=Object.fromEntries(nodes.map(n=>[n.id,n]));
+  el.innerHTML=chrome()+`
+  <div class="kicker fade" id="k" style="position:absolute;left:80px;top:70px">CONTEXT ENGINE</div>
+  <div id="h" class="big fade" style="position:absolute;left:80px;top:105px;font-size:44px">A relevant graph around the change — not a truncated diff.</div>
+  <svg id="svg" width="1920" height="1080" style="position:absolute;inset:0;overflow:visible"></svg>
+  <div id="ns"></div>
+  <div id="tag1" class="chip fade" style="position:absolute;left:80px;bottom:170px;border-color:rgba(239,68,68,.6);color:#fecaca">CHANGED CODE</div>
+  <div id="tag2" class="chip fade" style="position:absolute;left:300px;bottom:170px;border-color:#3a4150">RELATED CODE</div>
+  <div id="tag3" class="chip fade" style="position:absolute;left:540px;bottom:170px;border-color:rgba(245,158,11,.6);color:#fde68a">EVIDENCE</div>`;
+  mark(el,'#k',true,seg(t,.2,.6));mark(el,'#h',true,seg(t,.4,1.1));
+  const svg=$('#svg',el);
+  svg.innerHTML=edges.map(([a,b],i)=>{const A=pos[a],B=pos[b];return `<line class="edge ${a==='changed'?'red':''}" id="ed${i}" x1="${A.x+200}" y1="${A.y+(B.y>A.y?60:-60)}" x2="${B.x+200}" y2="${B.y+(B.y>A.y?-40:40)}"/>`;}).join('');
+  const box=$('#ns',el);
+  if(box.childElementCount===0){
+    nodes.forEach(n=>{
+      const d=document.createElement('div');
+      d.id='n_'+n.id;
+      d.className='node'+(n.hot?' hot':'');
+      d.style.cssText=`position:absolute;left:${n.x}px;top:${n.y}px;width:400px;text-align:center`;
+      d.innerHTML=`<div style="font-weight:700;color:${n.hot?'#fff':'var(--g3)'}">${n.label}</div><div class="mono" style="font-size:13px;color:var(--g1);margin-top:4px">${n.sub}</div>`;
+      box.appendChild(d);
+    });
+  }
+  const centerOn=ease(seg(t,2.5,3.5));
+  const cn=$('#n_changed',el);cn.style.opacity=centerOn;cn.style.transform=`scale(${.9+centerOn*.1})`;cn.classList.toggle('hot',true);
+  edges.forEach((e,i)=>{const ed=$('#ed'+i,el);const on=ease(seg(t,4+i*1.2,4.5+i*1.2));ed.style.opacity=on;ed.classList.toggle('on',on>.1);
+    const nn=$('#n_'+e[1],el);nn.style.opacity=on;nn.style.transform=`scale(${.92+on*.08})`;nn.classList.toggle('on',on>.1);});
+  mark(el,'#tag1',true,seg(t,12,12.6));mark(el,'#tag2',true,seg(t,13.2,13.8));mark(el,'#tag3',true,seg(t,14.6,15.2));
+  const scan=seg(t,16,26);
+  el.style.filter=`brightness(${1-Math.sin(scan*Math.PI)*.04})`;
+  el.style.opacity=1-ease(seg(t,DUR-.6,DUR));
+});
+
+/* ============================================================ STATIC + AI */
+register("static",(el,t)=>{
+  const rows=[['AST RULES','sql-interpolation · missing auth · always-true'],['SECRET SCAN','credentials & tokens in diffs'],['ADVISORIES','lodash 4.17.20 → prototype pollution'],['TEST-GAP ANALYSIS','new endpoints without coverage']];
+  el.innerHTML=chrome()+`
+  <div class="kicker fade" id="k" style="position:absolute;left:80px;top:70px">DETERMINISTIC FIRST</div>
+  <div id="stack" style="position:absolute;left:120px;top:200px;width:760px"></div>
+  <div id="plus" class="big fade" style="position:absolute;left:930px;top:480px;font-size:72px;color:var(--g2)">+</div>
+  <div id="ctx" class="panel fade" style="position:absolute;left:1010px;top:300px;width:780px;padding:34px">
+    <div class="kicker" style="color:var(--g2)">THEN</div>
+    <div class="big" style="font-size:32px;margin-top:10px">Grounded specialist agents</div>
+    <div class="mono" style="font-size:16px;color:var(--g1);margin-top:14px;line-height:1.7">security · bugs · performance<br>tests · maintainability · api · dependencies</div>
+  </div>
+  <div id="labels" style="position:absolute;left:120px;bottom:150px;display:flex;gap:22px"></div>`;
+  mark(el,'#k',true,seg(t,.2,.7));
+  const box=$('#stack',el);
+  if(box.childElementCount===0){
+    rows.forEach((r,i)=>{
+      const d=document.createElement('div');d.className='panel';d.id='r'+i;
+      d.style.cssText='padding:22px 26px;margin-bottom:18px;opacity:0;transform:translateX(-24px);transition:all .5s';
+      d.innerHTML=`<div style="font-size:22px;font-weight:700;color:var(--white)">${r[0]}</div><div class="mono" style="font-size:15px;color:var(--amber);margin-top:6px">${r[1]}</div>`;
+      box.appendChild(d);
+    });
+  }
+  rows.forEach((r,i)=>{const n=$('#r'+i,el);const e=ease(seg(t,1.4+i*1.1,1.9+i*1.1));n.style.opacity=e;n.style.transform=`translateX(${(1-e)*-24}px)`;});
+  mark(el,'#plus',true,seg(t,7.5,8));mark(el,'#ctx',true,seg(t,8.3,9));
+  const labs=$('#labels',el);
+  const defs=[['DETERMINISTIC','direct tool evidence','rgba(245,158,11,.6)','#fde68a'],['AI-DETECTED','model analysis','rgba(59,130,246,.6)','#bfdbfe'],['HYBRID','both agree','rgba(239,68,68,.6)','#fecaca']];
+  if(labs.childElementCount===0) defs.forEach((d,i)=>{
+    const x=document.createElement('div');x.id='lb'+i;
+    x.style.cssText=`border:1px solid ${d[2]};background:#101318;border-radius:12px;padding:18px 26px;opacity:0;transform:translateY(16px);transition:all .5s`;
+    x.innerHTML=`<div style="font-weight:800;letter-spacing:2px;color:${d[3]};font-size:22px">${d[0]}</div><div style="font-size:14px;color:var(--g1);margin-top:4px">${d[1]}</div>`;
+    labs.appendChild(x);
+  });
+  defs.forEach((d,i)=>{const n=$('#lb'+i,el);const e=ease(seg(t,12+i*1.4,12.5+i*1.4));n.style.opacity=e;n.style.transform=`translateY(${(1-e)*16}px)`;});
+  el.style.opacity=1-ease(seg(t,DUR-.6,DUR));
+});
+
+/* ============================================================ AGENT MESH */
+register("mesh",(el,t)=>{
+  const agents=[
+    ['SECURITY','authorization · injection · secrets'],
+    ['BUG HUNTER','correctness · edge cases · nulls'],
+    ['PERFORMANCE','N+1 · hot paths · queries'],
+    ['TESTS','coverage of changed behavior'],
+    ['MAINTAINABILITY','complexity · conventions'],
+    ['API CONTRACT','schema · backwards compat'],
+    ['DEPENDENCIES','advisories · licenses'],
+  ];
+  el.innerHTML=chrome()+`
+  <div class="kicker fade" id="k" style="position:absolute;left:50%;top:60px;transform:translateX(-50%);text-align:center">MULTI-AGENT REVIEW MESH</div>
+  <div id="pr" class="panel fade" style="position:absolute;left:50%;top:110px;transform:translateX(-50%);padding:12px 30px;text-align:center">
+    <div class="mono" style="color:var(--white);font-size:20px;font-weight:700">PULL REQUEST #184 @ b02f9e4</div>
+  </div>
+  <svg id="svg" width="1920" height="1080" style="position:absolute;inset:0;overflow:visible"></svg>
+  <div id="agents"></div>
+  <div id="critic" class="node ok fade" style="position:absolute;left:50%;bottom:120px;transform:translateX(-50%);width:520px;text-align:center;padding:20px">
+    <div style="font-weight:800;letter-spacing:2px;color:#bbf7d0;font-size:24px">ADVERSARIAL CRITIC</div>
+    <div style="font-size:14px;color:var(--g1);margin-top:4px">challenges every HIGH / CRITICAL finding</div>
+  </div>`;
+  mark(el,'#k',true,seg(t,.2,.7));mark(el,'#pr',true,seg(t,.6,1.2));
+  const box=$('#agents',el);
+  const W=420,H=120,gapX=40,gapY=30;
+  const totalW=4*W+3*gapX; const startX=(1920-totalW)/2; const startY=300;
+  if(box.childElementCount===0){
+    agents.forEach((a,i)=>{
+      const col=i%4,row=Math.floor(i/4);
+      const x=startX+col*(W+gapX)+(row? (W+gapX)/2:0);
+      const y=startY+row*(H+gapY);
+      const d=document.createElement('div');d.className='node';d.id='ag'+i;
+      d.style.cssText=`position:absolute;left:${x}px;top:${y}px;width:${W}px;padding:20px`;
+      d.innerHTML=`<div style="font-weight:800;letter-spacing:1px;color:var(--white);font-size:21px">${a[0]}</div><div style="font-size:14px;color:var(--g1);margin-top:6px">${a[1]}</div>
+        <div class="mono" id="fc${i}" style="margin-top:10px;font-size:13px;color:#fca5a5;opacity:0">finding → structured JSON</div>`;
+      box.appendChild(d);
+    });
+  }
+  const svg=$('#svg',el);let lines='';
+  agents.forEach((a,i)=>{
+    const col=i%4,row=Math.floor(i/4);
+    const x=startX+col*(W+gapX)+(row?(W+gapX)/2:0)+W/2;
+    const y=startY+row*(H+gapY);
+    lines+=`<line class="edge" id="in${i}" x1="960" y1="180" x2="${x}" y2="${y-12}"/>`;
+    lines+=`<line class="edge green" id="out${i}" x1="${x}" y1="${y+H+8}" x2="960" y2="830" style="opacity:0"/>`;
+  });
+  svg.innerHTML=lines;
+  agents.forEach((a,i)=>{
+    const on=ease(seg(t,3+i*.9,3.5+i*.9));
+    const ag=$('#ag'+i,el);ag.style.opacity=on;ag.style.transform=`scale(${.94+on*.06})`;ag.classList.toggle('on',on>.1);
+    const inl=$('#in'+i,el);inl.classList.toggle('on',on>.1);inl.style.opacity=on;
+    const fc=$('#fc'+i,el);const fo=ease(seg(t,11+i*.5,11.4+i*.5));fc.style.opacity=fo;
+    const outl=$('#out'+i,el);const oo=ease(seg(t,17,19));outl.style.opacity=oo*.6;outl.classList.toggle('on',oo>.1);
+  });
+  mark(el,'#critic',true,seg(t,20,21));
+  el.style.opacity=1-ease(seg(t,DUR-.7,DUR));
+});
+
+/* ============================================================ CRITIC */
+register("critic",(el,t)=>{
+  const qs=['Could this finding be wrong?','Is there repository context that disproves it?','Is the behavior intentional?','Does the evidence support the claim?'];
+  el.innerHTML=chrome()+`
+  <div class="kicker fade" id="k" style="position:absolute;left:80px;top:70px">THE CRITIC</div>
+  <div id="finding" class="panel fade hot" style="position:absolute;left:120px;top:180px;width:760px;padding:30px;border-color:rgba(239,68,68,.6)">
+    <div style="display:flex;gap:12px;align-items:center"><span style="background:var(--red2);color:#fff;font-weight:800;padding:6px 12px;border-radius:6px;letter-spacing:1px;font-size:15px">CRITICAL</span><span class="mono" style="color:var(--g1);font-size:15px">src/routes/members.ts:51</span></div>
+    <div class="big" style="font-size:30px;margin-top:18px">SQL query built from interpolated input</div>
+    <div class="mono" style="margin-top:16px;background:#0a0c0f;border:1px solid var(--line);border-radius:8px;padding:16px;font-size:16px;color:#fca5a5">WHERE org_id = '${'${orgId}'}' AND role='${'${role}'}'</div>
+  </div>
+  <div id="shield" class="fade" style="position:absolute;right:200px;top:210px;width:300px;height:300px;display:none"></div>
+  <div id="qs" style="position:absolute;left:980px;top:190px;width:800px"></div>
+  <div id="verdicts" style="position:absolute;left:120px;bottom:150px;display:flex;gap:18px"></div>`;
+  mark(el,'#k',true,seg(t,.2,.7));mark(el,'#finding',true,seg(t,.6,1.3));
+  const qbox=$('#qs',el);
+  if(qbox.childElementCount===0) qs.forEach((q,i)=>{
+    const d=document.createElement('div');d.id='q'+i;
+    d.style.cssText='display:flex;gap:16px;align-items:flex-start;margin-bottom:26px;opacity:0;transform:translateX(20px);transition:all .5s';
+    d.innerHTML=`<span style="color:var(--red);font-size:30px;line-height:1">?</span><span style="font-size:27px;line-height:1.35;color:var(--g3)">${q}</span>`;
+    qbox.appendChild(d);
+  });
+  qs.forEach((q,i)=>{const n=$('#q'+i,el);const e=ease(seg(t,4+i*3.2,4.5+i*3.2));n.style.opacity=e;n.style.transform=`translateX(${(1-e)*20}px)`;});
+  const vb=$('#verdicts',el);
+  const vd=[['CONFIRMED','7 findings','rgba(34,197,94,.6)','#bbf7d0'],['WEAK','downgraded','rgba(245,158,11,.6)','#fde68a'],['FALSE POSITIVE','dropped','rgba(239,68,68,.6)','#fecaca'],['UNCERTAIN','flagged','#3a4150','var(--g2)']];
+  if(vb.childElementCount===0) vd.forEach((v,i)=>{
+    const d=document.createElement('div');d.id='v'+i;
+    d.style.cssText=`border:1px solid ${v[2]};border-radius:12px;padding:20px 30px;opacity:0;transform:translateY(18px);transition:all .5s;text-align:center`;
+    d.innerHTML=`<div style="font-weight:800;letter-spacing:1px;font-size:23px;color:${v[3]}">${v[0]}</div><div style="font-size:14px;color:var(--g1);margin-top:4px">${v[1]}</div>`;
+    vb.appendChild(d);
+  });
+  vd.forEach((v,i)=>{const n=$('#v'+i,el);const e=ease(seg(t,17+i*.8,17.6+i*.8));n.style.opacity=e;n.style.transform=`translateY(${(1-e)*18}px)`;});
+  // final stamp
+  el.insertAdjacentHTML('beforeend',`<div id="stamp" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.6);border:4px solid var(--green);color:#bbf7d0;border-radius:18px;padding:18px 44px;font-size:54px;font-weight:800;letter-spacing:8px;opacity:0">CONFIRMED</div>`);
+  const st=$('#stamp',el);const so=ease(seg(t,22,22.7));st.style.opacity=so*.92;st.style.transform=`translate(-50%,-50%) scale(${.6+so*.4}) rotate(${(1-so)*-6}deg)`;
+  el.style.opacity=1-ease(seg(t,DUR-.7,DUR));
+});
+
+/* ============================================================ EVIDENCE CHAIN motion */
+register("chain",(el,t)=>{
+  const steps=['FINDING','CHANGED CODE','RELATED CODE','REPO CONTEXT','DETERMINISTIC EVIDENCE','AI ANALYSIS','CRITIC VERIFICATION','RECOMMENDATION'];
+  el.innerHTML=chrome()+`
+  <div class="kicker fade" id="k" style="position:absolute;left:50%;top:90px;transform:translateX(-50%)">WHY DID PRISM FLAG THIS?</div>
+  <svg id="svg" width="1920" height="300" style="position:absolute;top:420px;overflow:visible"></svg>
+  <div id="steps" style="position:absolute;top:330px;left:0;right:0"></div>
+  <div id="line" class="big fade" style="position:absolute;left:50%;bottom:150px;transform:translateX(-50%);font-size:40px;text-align:center;width:1400px;line-height:1.35">Every meaningful finding is backed by <span style="color:var(--red)">evidence</span>, not opinion.</div>`;
+  mark(el,'#k',true,seg(t,.2,.8));
+  const box=$('#steps',el);
+  const n=steps.length,w=210,gap=22,total=n*w+(n-1)*gap,x0=(1920-total)/2;
+  if(box.childElementCount===0) steps.forEach((s,i)=>{
+    const d=document.createElement('div');d.id='st'+i;d.className='node';
+    d.style.cssText=`position:absolute;left:${x0+i*(w+gap)}px;top:0;width:${w}px;min-height:120px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:16px;font-weight:700;letter-spacing:1px;line-height:1.3`;
+    d.textContent=s;box.appendChild(d);
+  });
+  const svg=$('#svg',el);
+  svg.innerHTML=steps.slice(0,-1).map((s,i)=>`<line class="edge ${i>=4?'amber':''}" id="ln${i}" x1="${x0+w+i*(w+gap)}" y1="60" x2="${x0+(i+1)*(w+gap)}" y2="60"/>`).join('');
+  steps.forEach((s,i)=>{
+    const on=ease(seg(t,1.2+i*.85,1.7+i*.85));
+    const st=$('#st'+i,el);st.style.opacity=on;st.style.transform=`scale(${.9+on*.1})`;st.classList.toggle('on',on>.1);st.classList.toggle('hot',i===0 && on>.1);
+    if(i<steps.length-1){const ln=$('#ln'+i,el);ln.classList.toggle('on',on>.5);ln.style.opacity=on;}
+  });
+  mark(el,'#line',true,seg(t,9.5,10.3));
+  el.style.opacity=1-ease(seg(t,DUR-.6,DUR));
+});
+
+/* ============================================================ RISK */
+register("risk",(el,t)=>{
+  const bars=[['SECURITY',92],['CORRECTNESS',74],['PERFORMANCE',40],['MAINTAINABILITY',0],['TESTING',62],['DEPENDENCIES',74],['CHANGE SCOPE',26]];
+  el.innerHTML=chrome()+`
+  <div class="kicker fade" id="k" style="position:absolute;left:80px;top:70px">RISK ENGINE</div>
+  <div style="position:absolute;left:110px;top:210px">
+    <div id="score" class="big" style="font-size:220px;line-height:1;color:var(--red)">0</div>
+    <div id="lvl" class="fade" style="font-size:26px;letter-spacing:5px;color:#fca5a5;font-weight:700;margin-top:6px">HIGH RISK · / 100</div>
+    <div id="rec" class="fade" style="margin-top:26px;display:inline-block;background:var(--red2);color:#fff;font-weight:800;letter-spacing:2px;padding:14px 30px;border-radius:10px;font-size:24px">REQUEST CHANGES</div>
+  </div>
+  <div id="bars" style="position:absolute;right:120px;top:220px;width:820px"></div>
+  <div id="pols" class="fade" style="position:absolute;right:140px;bottom:130px;display:flex;gap:14px"></div>`;
+  mark(el,'#k',true,seg(t,.2,.7));
+  const score=Math.floor(ease(seg(t,1,3))*63);
+  $('#score',el).textContent=score;
+  mark(el,'#lvl',true,seg(t,3.4,4));mark(el,'#rec',true,seg(t,9,9.7));
+  const bb=$('#bars',el);
+  if(bb.childElementCount===0) bars.forEach(([l,v],i)=>{
+    const d=document.createElement('div');d.id='b'+i;
+    d.style.cssText='display:flex;align-items:center;gap:18px;margin-bottom:22px;opacity:0;transition:opacity .4s';
+    d.innerHTML=`<span style="width:210px;font-size:17px;letter-spacing:1px;color:var(--g2)">${l}</span>
+      <span style="flex:1;height:12px;background:#171a20;border-radius:6px;overflow:hidden"><span id="bf${i}" style="display:block;height:100%;width:0;background:linear-gradient(90deg,var(--amber),var(--red))"></span></span>
+      <span id="bn${i}" class="mono" style="width:40px;text-align:right;color:var(--g3)">0</span>`;
+    bb.appendChild(d);
+  });
+  bars.forEach(([l,v],i)=>{
+    const on=ease(seg(t,4+i*.35,4.4+i*.35));
+    $('#b'+i,el).style.opacity=on;
+    const p=ease(seg(t,4.6+i*.35,5.6+i*.35));
+    $('#bf'+i,el).style.width=(p*v)+'%';
+    $('#bn'+i,el).textContent=Math.round(p*v);
+  });
+  const pol=$('#pols',el);
+  [['APPROVE',false],['WARNINGS',false],['REQUEST CHANGES',true],['BLOCK',false]].forEach(([p,on],i)=>{
+    if(pol.children[i])return;
+    const d=document.createElement('div');d.id='p'+i;
+    d.style.cssText=`border:1px solid ${on?'var(--red)':'var(--line)'};border-radius:10px;padding:12px 22px;font-size:16px;font-weight:700;letter-spacing:1px;color:${on?'#fecaca':'var(--g1)'};background:${on?'rgba(239,68,68,.1)':'transparent'}`;
+    d.textContent=p;pol.appendChild(d);
+  });
+  mark(el,'#pols',true,seg(t,9.4,10));
+  el.style.opacity=1-ease(seg(t,DUR-.6,DUR));
+});
+
+/* ============================================================ REGRESSION */
+register("regression",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div class="kicker fade" id="k" style="position:absolute;left:50%;top:64px;transform:translateX(-50%)">RE-REVIEW · FINGERPRINTS</div>
+  <div id="before" class="panel fade" style="position:absolute;left:120px;top:200px;width:760px;padding:34px;border-color:rgba(239,68,68,.4)">
+    <div class="mono" style="color:var(--g1)">review #1 · b02f9e4</div>
+    <div class="big" style="font-size:96px;color:var(--red);line-height:1.1">63</div>
+    <div style="color:#fca5a5;font-weight:700;letter-spacing:2px">REQUEST CHANGES · 13 OPEN FINDINGS</div>
+  </div>
+  <div id="push" class="fade mono" style="position:absolute;left:50%;top:430px;transform:translate(-50%);font-size:22px;color:var(--amber);text-align:center">
+    git push origin fix<br><span style="color:var(--g1);font-size:16px">pull_request · synchronize → c33d71a</span>
+  </div>
+  <div id="arrow" style="position:absolute;left:50%;top:560px;transform:translateX(-50%);font-size:60px;color:var(--g2);opacity:0">→</div>
+  <div id="after" class="panel fade" style="position:absolute;right:120px;top:200px;width:760px;padding:34px;border-color:rgba(34,197,94,.4)">
+    <div class="mono" style="color:var(--g1)">review #2 · c33d71a</div>
+    <div class="big" style="font-size:96px;color:var(--green);line-height:1.1">3</div>
+    <div style="color:#bbf7d0;font-weight:700;letter-spacing:2px">APPROVE · 0 OPEN FINDINGS</div>
+  </div>
+  <div id="stamps" style="position:absolute;left:50%;bottom:170px;transform:translateX(-50%);display:flex;gap:18px"></div>`;
+  mark(el,'#k',true,seg(t,.2,.7));mark(el,'#before',true,seg(t,.6,1.3));
+  mark(el,'#push',true,seg(t,3,3.6));
+  const ar=$('#arrow',el);ar.style.opacity=ease(seg(t,4.5,5));ar.style.transform=`translateX(calc(-50% + ${(1-ease(seg(t,4.5,5.4)))*-30}px))`;
+  mark(el,'#after',true,seg(t,5.6,6.3));
+  const sb=$('#stamps',el);
+  [['FIXED · 13','rgba(34,197,94,.6)','#bbf7d0'],['PERSISTENT · 0','#3a4150','var(--g2)'],['NEW · 0','#3a4150','var(--g2)']].forEach(([s,c,fc],i)=>{
+    if(sb.children[i])return;
+    const d=document.createElement('div');d.id='rs'+i;
+    d.style.cssText=`border:1px solid ${c};border-radius:12px;padding:18px 34px;font-weight:800;letter-spacing:2px;font-size:24px;color:${fc};opacity:0;transform:translateY(16px);transition:all .5s`;
+    d.textContent=s;sb.appendChild(d);
+  });
+  for(let i=0;i<3;i++){const n=$('#rs'+i,el);const e=ease(seg(t,7.5+i*.7,8+i*.7));n.style.opacity=e;n.style.transform=`translateY(${(1-e)*16}px)`;}
+  el.style.opacity=1-ease(seg(t,DUR-.7,DUR));
+});
+
+/* ============================================================ FINAL */
+register("final",(el,t)=>{
+  const lines=['BEYOND THE DIFF.','UNDERSTAND THE CHANGE.','VERIFY THE RISK.','REVIEW WITH EVIDENCE.'];
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+    <div id="word" class="big" style="font-size:110px;letter-spacing:30px;padding-left:30px;opacity:0">PRISM</div>
+    <div id="bar" style="height:2px;width:0;background:var(--red);margin:26px 0"></div>
+    <div id="lines" style="text-align:center"></div>
+    <div id="sub" class="mono" style="position:absolute;bottom:110px;font-size:16px;letter-spacing:4px;color:var(--g1);opacity:0">PULL REQUEST INTELLIGENCE &amp; REVIEW MESH</div>
+  </div>`;
+  $('#word',el).style.opacity=ease(seg(t,.2,1));
+  $('#bar',el).style.width=(ease(seg(t,.8,1.6))*420)+'px';
+  const box=$('#lines',el);
+  if(box.childElementCount===0) lines.forEach((l,i)=>{
+    const d=document.createElement('div');d.id='fl'+i;
+    d.style.cssText=`font-size:46px;font-weight:700;letter-spacing:4px;color:${i===0?'#fff':'var(--g2)'};margin:14px 0;opacity:0;transform:translateY(14px);transition:all .6s`;
+    d.textContent=l;box.appendChild(d);
+  });
+  lines.forEach((l,i)=>{const n=$('#fl'+i,el);const e=ease(seg(t,2+i*.85,2.6+i*.85));n.style.opacity=e;n.style.transform=`translateY(${(1-e)*14}px)`;});
+  $('#sub',el).style.opacity=ease(seg(t,7,7.8));
+  el.style.opacity=1-ease(seg(t,DUR-1.2,DUR-.2));
+});
+
+/* ============================================================ VERTICAL scenes */
+register("v-hook",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:50px;padding:80px">
+    <div class="panel mono" id="gh" style="width:900px;padding:30px;opacity:0;transform:scale(.96)">
+      <div style="font-size:26px;color:#dfe4ec;font-weight:700">Pull request #184</div>
+      <div style="font-size:20px;color:var(--g1);margin-top:8px">Add organization member management API</div>
+      <div style="margin-top:18px;background:#0a0c0f;border-radius:8px;padding:18px;font-size:19px;color:#fca5a5;border:1px solid rgba(239,68,68,.4)">+ db.query(\`... role='\${role}'\`)</div>
+    </div>
+    <div id="txt" class="big" style="font-size:76px;text-align:center;line-height:1.12;opacity:0">AI CODE REVIEW<br><span style="color:var(--red)">ISN'T ENOUGH.</span></div>
+  </div>
+  <div id="flash" style="position:absolute;inset:0;background:var(--red);opacity:0"></div>`;
+  const gh=ease(seg(t,.15,.6));$('#gh',el).style.opacity=gh;$('#gh',el).style.transform=`scale(${.96+gh*.04})`;
+  const tx=ease(seg(t,1.4,2));$('#txt',el).style.opacity=tx;$('#txt',el).style.transform=`scale(${1.06-tx*.06})`;
+  $('#flash',el).style.opacity=ease(seg(t,2.9,3))*.5*(1-ease(seg(t,3,3.3)));
+  el.style.opacity=1-ease(seg(t,DUR-.3,DUR));
+});
+register("v-diff",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+    <div id="line" class="panel mono" style="width:880px;padding:26px;font-size:26px;border-color:rgba(239,68,68,.6);background:rgba(239,68,68,.07);color:#fecaca;opacity:0">
+      + WHERE org_id='\${orgId}' AND role='\${role}'
+    </div>
+    <svg id="svg" width="1080" height="1100" style="position:absolute;top:360px;overflow:visible"></svg>
+    <div id="ns"></div>
+    <div id="txt" class="big" style="position:absolute;bottom:230px;font-size:66px;text-align:center;width:900px;line-height:1.15;opacity:0">THE DIFF ISN'T<br>THE WHOLE STORY.</div>
+  </div>`;
+  const ln=ease(seg(t,.15,.6));$('#line',el).style.opacity=ln;$('#line',el).style.transform=`scale(${1.15-ln*.15})`;
+  const files=[['auth.ts',140,160],['db/client.ts',560,160],['app.ts',120,760],['organizations.ts',600,760],['members.test.ts',340,980]];
+  const box=$('#ns',el);
+  if(box.childElementCount===0) files.forEach(([f,x,y])=>{
+    const d=document.createElement('div');d.className='mono';
+    d.style.cssText=`position:absolute;left:${x}px;top:${y}px;border:1px solid var(--line);background:#101318;border-radius:10px;padding:16px 20px;font-size:20px;color:var(--g2);opacity:0;transition:all .5s;white-space:nowrap`;
+    d.textContent=f;box.appendChild(d);
+  });
+  const svg=$('#svg',el);
+  svg.innerHTML=files.map((f,i)=>`<line class="edge red" id="ve${i}" x1="540" y1="120" x2="${f[1]+110}" y2="${f[2]-360}"/>`).join('');
+  files.forEach((f,i)=>{const e=ease(seg(t,1+i*.35,1.4+i*.35));box.children[i].style.opacity=e;box.children[i].style.transform=`scale(${.9+e*.1})`;const l=$('#ve'+i,el);l.classList.toggle('on',e>.1);l.style.opacity=e;});
+  $('#txt',el).style.opacity=ease(seg(t,3.4,4));
+  el.style.opacity=1-ease(seg(t,DUR-.3,DUR));
+});
+register("v-title",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:34px">
+    <div id="bar" style="width:0;height:3px;background:var(--red)"></div>
+    <div id="w" class="big" style="font-size:120px;letter-spacing:24px;padding-left:24px;opacity:0">PRISM</div>
+    <div id="t" style="font-size:44px;line-height:1.3;text-align:center;color:var(--g3);font-weight:700;width:860px;opacity:0">AI CODE REVIEW THAT<br>UNDERSTANDS YOUR REPOSITORY.</div>
+  </div>`;
+  $('#bar',el).style.width=ease(seg(t,.1,.8))*360+'px';
+  $('#w',el).style.opacity=ease(seg(t,.3,.9));
+  $('#t',el).style.opacity=ease(seg(t,1.4,2));
+  el.style.opacity=1-ease(seg(t,DUR-.3,DUR));
+});
+register("v-mesh",(el,t)=>{
+  const agents=['SECURITY','BUGS','PERFORMANCE','TESTS','MAINTAINABILITY','API CONTRACT','DEPENDENCIES'];
+  el.innerHTML=chrome()+`<div id="grid" style="position:absolute;inset:200px 70px 500px"></div>
+  <div id="t1" class="big" style="position:absolute;bottom:300px;width:100%;text-align:center;font-size:64px;opacity:0">ONE PR.</div>
+  <div id="t2" class="big" style="position:absolute;bottom:180px;width:100%;text-align:center;font-size:56px;color:var(--red);opacity:0;padding:0 20px">7 SPECIALIZED REVIEWERS.</div>`;
+  const box=$('#grid',el);
+  if(box.childElementCount===0){
+    const positions=[[30,0],[570,0],[30,220],[570,220],[30,440],[570,440],[300,660]];
+    agents.forEach((a,i)=>{
+      const d=document.createElement('div');d.className='node';
+      d.style.cssText=`position:absolute;left:${positions[i][0]}px;top:${positions[i][1]}px;width:420px;text-align:center;padding:26px;font-size:26px;font-weight:800;letter-spacing:1px`;
+      d.textContent=a;box.appendChild(d);
+    });
+  }
+  agents.forEach((a,i)=>{const e=ease(seg(t,.4+i*.28,.7+i*.28));box.children[i].style.opacity=e;box.children[i].style.transform=`scale(${.92+e*.08})`;box.children[i].classList.toggle('on',e>.1);});
+  $('#t1',el).style.opacity=ease(seg(t,3.4,4));$('#t2',el).style.opacity=ease(seg(t,4,4.6));
+  el.style.opacity=1-ease(seg(t,DUR-.3,DUR));
+});
+register("v-critic",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:200px;gap:40px">
+    <div id="f" class="panel" style="width:900px;padding:30px;border-color:rgba(239,68,68,.6);opacity:0">
+      <span style="background:var(--red2);color:#fff;font-weight:800;padding:8px 14px;border-radius:6px;letter-spacing:1px">HIGH</span>
+      <div class="big" style="font-size:38px;margin-top:18px">Endpoint without authorization middleware</div>
+    </div>
+    <div id="t1" class="big" style="font-size:58px;text-align:center;width:900px;line-height:1.2;opacity:0">BUT PRISM DOESN'T TRUST<br><span style="color:var(--red)">EVERY AI FINDING.</span></div>
+    <div id="shield" class="node ok" style="width:560px;text-align:center;padding:30px;font-size:34px;font-weight:800;letter-spacing:2px;opacity:0">ADVERSARIAL CRITIC</div>
+    <div id="q" class="big" style="font-size:52px;color:var(--g3);opacity:0;text-align:center;width:900px">"COULD THIS BE WRONG?"</div>
+  </div>`;
+  const f=ease(seg(t,.2,.7));$('#f',el).style.opacity=f;
+  $('#t1',el).style.opacity=ease(seg(t,1.6,2.2));
+  const sh=ease(seg(t,3.2,3.8));$('#shield',el).style.opacity=sh;$('#shield',el).style.transform=`scale(${.9+sh*.1})`;
+  $('#q',el).style.opacity=ease(seg(t,4.4,5));
+  el.style.opacity=1-ease(seg(t,DUR-.3,DUR));
+});
+register("v-chain",(el,t)=>{
+  const steps=['CHANGED CODE','RELATED CODE','STATIC SIGNAL','REPO CONTEXT','EVIDENCE'];
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px;padding-top:120px">
+    ${steps.map((s,i)=>`<div id="s${i}" class="node" style="width:820px;text-align:center;padding:26px;font-size:30px;font-weight:800;letter-spacing:1px;opacity:0">${s}</div>${i<steps.length-1?'<div style="font-size:40px;color:var(--g1)">↓</div>':''}`).join('')}
+  </div>
+  <div id="t" class="big" style="position:absolute;bottom:150px;width:100%;text-align:center;font-size:56px;line-height:1.2;opacity:0">EVERY IMPORTANT FINDING<br><span style="color:var(--red)">NEEDS EVIDENCE.</span></div>`;
+  steps.forEach((s,i)=>{const n=$('#s'+i,el);const e=ease(seg(t,.3+i*.55,.7+i*.55));n.style.opacity=e;n.style.transform=`translateY(${(1-e)*16}px)`;n.classList.toggle('on',e>.1);if(i===4){n.style.borderColor='rgba(245,158,11,.6)';n.style.color='#fde68a';}});
+  $('#t',el).style.opacity=ease(seg(t,4.2,4.8));
+  el.style.opacity=1-ease(seg(t,DUR-.3,DUR));
+});
+register("v-risk",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px">
+    <div class="kicker" style="font-size:24px;letter-spacing:8px">PULL REQUEST RISK</div>
+    <div id="s" class="big" style="font-size:260px;color:var(--red);line-height:1">0</div>
+    <div style="font-size:40px;color:var(--g1)">/ 100 · HIGH</div>
+    <div id="r" style="background:var(--red2);color:#fff;font-weight:800;letter-spacing:3px;padding:22px 46px;border-radius:12px;font-size:40px;opacity:0">REQUEST CHANGES</div>
+  </div>`;
+  $('#s',el).textContent=Math.floor(ease(seg(t,.4,2.2))*63);
+  $('#r',el).style.opacity=ease(seg(t,2.8,3.3));
+  el.style.opacity=1-ease(seg(t,DUR-.3,DUR));
+});
+register("v-fix",(el,t)=>{
+  el.innerHTML=chrome()+`
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:60px">
+    <div id="a" class="big" style="font-size:64px;color:#fca5a5;opacity:0">13 FINDINGS · RISK 63</div>
+    <div id="push" class="mono" style="font-size:34px;color:var(--amber);opacity:0">$ git push origin fix</div>
+    <div id="b" class="big" style="font-size:64px;color:#bbf7d0;opacity:0">13 FIXED ✓ · RISK 3</div>
+    <div id="r" style="border:2px solid var(--green);color:#bbf7d0;font-weight:800;letter-spacing:4px;padding:24px 60px;border-radius:14px;font-size:56px;opacity:0;transform:scale(.7)">APPROVE ✓</div>
+  </div>`;
+  $('#a',el).style.opacity=ease(seg(t,.2,.7));
+  $('#push',el).style.opacity=ease(seg(t,1.6,2.1));
+  $('#b',el).style.opacity=ease(seg(t,3.2,3.8));
+  const ro=ease(seg(t,4.4,5));$('#r',el).style.opacity=ro;$('#r',el).style.transform=`scale(${.7+ro*.3})`;
+  el.style.opacity=1-ease(seg(t,DUR-.4,DUR));
+});
+register("v-final",(el,t)=>{
+  const lines=['BEYOND THE DIFF.','UNDERSTAND THE CHANGE.','VERIFY THE RISK.','REVIEW WITH EVIDENCE.'];
+  el.innerHTML=chrome()+`<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px">
+    <div id="w" class="big" style="font-size:96px;letter-spacing:22px;padding-left:22px;opacity:0">PRISM</div>
+    <div id="box"></div>
+    <div id="sub" class="mono" style="position:absolute;bottom:120px;font-size:18px;letter-spacing:4px;color:var(--g1);opacity:0">Pull Request Intelligence &amp; Review Mesh</div>
+  </div>`;
+  $('#w',el).style.opacity=ease(seg(t,.2,.8));
+  const box=$('#box',el);
+  lines.forEach((l,i)=>{const d=document.createElement('div');d.style.cssText=`font-size:44px;font-weight:700;letter-spacing:3px;color:${i===0?'#fff':'var(--g2)'};margin:16px 0;opacity:0;transform:translateY(14px);transition:all .5s`;d.textContent=l;box.appendChild(d);
+    const e=ease(seg(t,1+i*.55,1.5+i*.55));d.style.opacity=e;d.style.transform=`translateY(${(1-e)*14}px)`;});
+  $('#sub',el).style.opacity=ease(seg(t,5,5.6));
+  el.style.opacity=1-ease(seg(t,DUR-1,DUR));
+});
+
+register("v-pipe",(el,t)=>{
+  const stages=[
+    ['WEBHOOK','HMAC verified'],['SNAPSHOT','pinned to SHA'],['CONTEXT','code graph'],
+    ['DETECTORS','rules first'],['7 AGENTS','parallel review'],['CRITIC','adversarial'],
+    ['EVIDENCE','grounding check'],['RISK','63 / 100'],['PUBLISH','to GitHub']];
+  el.innerHTML=chrome()+`
+  <div class="kicker" style="position:absolute;top:150px;width:100%;text-align:center;font-size:22px;letter-spacing:10px;opacity:0" id="k">THE PIPELINE</div>
+  <div id="list" style="position:absolute;top:300px;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:26px"></div>`;
+  const box=$('#list',el);
+  stages.forEach((st,i)=>{
+    const d=document.createElement('div');
+    d.className='node';
+    d.style.cssText=`width:760px;padding:24px 30px;display:flex;justify-content:space-between;align-items:center;opacity:0;transform:translateX(${i%2?60:-60}px);transition:all .35s cubic-bezier(.2,.8,.2,1)`;
+    d.innerHTML=`<span style="font-weight:800;letter-spacing:2px;font-size:34px;color:#fff">${st[0]}</span><span class="mono" style="font-size:22px;color:var(--g1)">${st[1]}</span>`;
+    box.appendChild(d);
+  });
+  stages.forEach((st,i)=>{const e=ease(seg(t,.3+i*.45,.65+i*.45));const n=box.children[i];n.style.opacity=e;n.style.transform=`translateX(${(1-e)*(i%2?60:-60)}px)`;});
+  // red scan pulse down the column
+  const cy=seg(t,.3,4.6);
+  const scan=document.createElement('div');
+  scan.style.cssText=`position:absolute;left:120px;right:120px;top:${300+cy*1300}px;height:6px;background:linear-gradient(90deg,transparent,var(--red),transparent);opacity:.7;filter:blur(1px)`;
+  el.appendChild(scan);
+  $('#k',el).style.opacity=ease(seg(t,.1,.5));
+  el.style.opacity=1-ease(seg(t,DUR-.3,DUR));
+});
+
+/* ---------- runner ---------- */
+const fn=scenes[SCENE];
+const stage=document.getElementById('stage');
+document.body.classList.toggle('v',V);
+let start=null;
+function frame(ts){
+  if(start===null)start=ts;
+  const t=(ts-start)/1000;
+  try{fn(stage,t);}catch(e){}
+  if(t<DUR+.4) requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

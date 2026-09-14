@@ -1,0 +1,106 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+:root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--g:#8b949e;--g2:#c9d1d9;--red:#f85149;--green:#3fb950}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;background:#08090b;overflow:hidden;font-family:Inter,Segoe UI,system-ui,sans-serif;color:var(--g2)}
+#wrap{position:absolute;inset:0;background:#08090b}
+.grid-bg{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(circle at 50% 40%,#000 30%,transparent 80%)}
+#demo{position:absolute;top:46px;left:50%;transform:translateX(-50%);background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.6);color:#fde68a;font-weight:700;letter-spacing:2px;padding:10px 24px;border-radius:10px;font-size:18px;opacity:0}
+#col{position:absolute;left:50%;top:120px;transform:translateX(-50%);width:1180px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:22px;opacity:0;transform:translateY(22px);transition:all .6s cubic-bezier(.2,.8,.2,1)}
+.head{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);font-size:17px}
+.ava{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#3b82f6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff}
+.body{padding:20px 24px;font-size:19px;line-height:1.65}
+.body h2{font-size:23px;margin-bottom:8px;color:#f0f6fc}
+.body h3{font-size:18px;margin:14px 0 6px;color:#f0f6fc}
+.body b{color:#f0f6fc}
+.body code{font-family:ui-monospace,Menlo,monospace;background:#0d1117;padding:2px 7px;border-radius:6px;font-size:.92em;color:#79c0ff}
+.body blockquote{border-left:3px solid var(--line);padding-left:14px;color:var(--g);margin:8px 0}
+.body ol{padding-left:26px}.body li{margin:3px 0}.body sub{color:var(--g)}
+.tag{display:inline-block;font-size:13px;font-weight:800;letter-spacing:1px;border-radius:6px;padding:4px 10px;margin-right:8px}
+.sev-CRITICAL{background:rgba(248,81,73,.2);color:#ffa198;border:1px solid rgba(248,81,73,.5)}
+.sev-HIGH{background:rgba(248,81,73,.12);color:#ff7b72}
+.fileline{display:flex;align-items:center;gap:10px;font-family:ui-monospace,Menlo,monospace;font-size:15px;color:#79c0ff;padding:12px 20px;background:#0d1117;border-bottom:1px solid var(--line)}
+.code{font-family:ui-monospace,Menlo,monospace;font-size:16px;padding:12px 24px 14px;background:#161b22;color:#ffdcd7;border-left:3px solid var(--red)}
+.ev{font-size:16px;color:var(--g);padding:0 24px 18px}.ev b{color:var(--g2)}
+#banner2{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);font-size:18px;color:var(--g);opacity:0}
+</style></head>
+<body><div id="wrap"><div class="grid-bg"></div>
+<div id="demo">⚠ DEMO MODE — exact payload stored for inspection · no GitHub call is made</div>
+<div id="col"></div>
+<div id="banner2">In production the same payload posts to the GitHub Reviews API · commit-pinned · signed webhooks</div>
+</div>
+<script>
+const PAYLOAD = __PAYLOAD__;
+const params=new URLSearchParams(location.search);const DUR=parseFloat(params.get('dur')||'30');
+const col=document.getElementById('col');
+const stripEmoji = s => s
+  .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{2190}-\u{21FF}\u{25A0}-\u{25FF}\u{2300}-\u{23FF}]/gu,'')
+  .replace(/\s+/g,' ').trim();
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function inline(s){
+  s=esc(s);
+  s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+  return s;
+}
+function md(raw){
+  const lines=raw.split('\n'); let out=''; let i=0; let list=null;
+  const flush=()=>{ if(list!==null){out+='<ol style="padding-left:26px">'+list+'</ol>';list=null;} };
+  for(;i<lines.length;i++){
+    let l=lines[i];
+    const m=l.match(/^(\d+)\.\s+(.*)$/);
+    if(m){ if(list===null)list=''; list+='<li>'+inline(m[2])+'</li>'; continue; }
+    flush();
+    if(!l.trim()){continue;}
+    if(l.startsWith('## ')){out+='<h2>'+inline(stripEmoji(l.slice(3)))+'</h2>';continue;}
+    if(l.startsWith('### ')){out+='<h3>'+inline(l.slice(4))+'</h3>';continue;}
+    if(l.startsWith('> ')){out+='<blockquote>'+inline(stripEmoji(l.slice(2)))+'</blockquote>';continue;}
+    if(l.startsWith('- ')){out+='<div style="color:var(--g);font-size:18px;margin:3px 0">'+inline(l.slice(2))+'</div>';continue;}
+    out+='<div style="margin:6px 0">'+inline(stripEmoji(l))+'</div>';
+  }
+  flush();
+  return out;
+}
+// summary card
+const sum=document.createElement('div');sum.className='card';sum.id='sum';
+const bodyHtml = md(PAYLOAD.body
+  .replace(/\n?<sub>[\s\S]*?<\/sub>/,'')
+  .replace(/\n?Full evidence[\s\S]*?\)\n?/,'')
+  .replace(/\n### (Static analysis|Risk explanation)[\s\S]*$/,''));
+sum.innerHTML=`<div class="head"><div class="ava">P</div><b>prism-bot</b> reviewed this pull request <span style="color:var(--g)">· REQUEST CHANGES</span></div>
+<div class="body">${bodyHtml}</div>`;
+col.appendChild(sum);
+// 3 inline comments: CRITICAL + 2 HIGH
+const want=PAYLOAD.comments.slice(0,3);
+const cards=[sum];
+want.forEach((c,i)=>{
+  const firstLine=stripEmoji(c.body.split('\n')[0].replace(/\*\*/g,'')).trim();
+  const sev=(firstLine.match(/CRITICAL|HIGH|MEDIUM|LOW/)||[''])[0];
+  const title=firstLine.replace(/^\s*(CRITICAL|HIGH|MEDIUM|LOW)\s*[—-]?\s*/,'');
+  const evBlock=c.body.split('**Evidence**')[1]||'';
+  const evLines=evBlock.split('\n').filter(x=>x.trim().startsWith('-')).slice(0,2)
+    .map(x=>inline(x.replace(/^\s*-\s*/,''))).join('<br>');
+  const codeMatch=c.body.match(/`(SELECT[\s\S]*?|[^`]*router\.[a-z]+[^`]*)`/);
+  const d=document.createElement('div');d.className='card';d.id='c'+i;
+  d.innerHTML=`<div class="head"><div class="ava" style="background:linear-gradient(135deg,#7c3aed,#ef4444)">P</div><b>prism-bot</b><span class="tag sev-${sev}">${sev}</span><span style="color:var(--g)">inline review comment</span></div>
+  <div class="body" style="padding-bottom:6px"><h2 style="font-size:20px">${esc(title)}</h2></div>
+  <div class="fileline">${c.path}:${c.line}</div>
+  ${codeMatch?`<div class="code">${esc(codeMatch[1])}</div>`:''}
+  <div class="ev"><b>Evidence</b><br>${evLines}</div>`;
+  col.appendChild(d);cards.push(d);
+});
+const times=[.6, 7.5, 14, 20.5];
+let start=null;
+const ease=x=>x<.5?2*x*x:1-Math.pow(-2*x+2,2)/2;
+function f(ts){if(start===null)start=ts;const t=(ts-start)/1000;
+  cards.forEach((c,i)=>{const e=ease(Math.max(0,Math.min(1,(t-times[i])/.7)));c.style.opacity=e;c.style.transform=`translateY(${(1-e)*22}px)`;});
+  document.getElementById('demo').style.opacity=ease(Math.max(0,Math.min(1,(t-.3)/.6)));
+  document.getElementById('banner2').style.opacity=ease(Math.max(0,Math.min(1,(t-23)/.8)))*.9;
+  // slow scroll
+  const max=Math.max(0,col.scrollHeight-900);
+  col.style.transform=`translateX(-50%) translateY(${-Math.min(max,Math.max(0,(t-9)/17*max))}px)`;
+  if(t<DUR+.4)requestAnimationFrame(f);
+}
+requestAnimationFrame(f);
+</script></body></html>
